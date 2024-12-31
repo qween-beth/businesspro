@@ -1,0 +1,9 @@
+plotly
+pandas
+numpy
+xlsxwriter
+tabulator
+flask
+gunicorn
+datetime
+dotenv

@@ -1,0 +1,109 @@
+
+<!-- templates/results.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Business Analysis Results</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tabulator/4.9.3/js/tabulator.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tabulator/4.9.3/css/tabulator.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Business Intelligence Dashboard</h1>
+            <div class="export-buttons">
+                <a href="{{ url_for('export_data', format='excel') }}" class="button">Export to Excel</a>
+                <a href="{{ url_for('export_data', format='pdf') }}" class="button">Export to PDF</a>
+            </div>
+        </header>
+
+        <!-- Quick Stats Dashboard -->
+        <div class="quick-stats">
+            <div class="stat-card">
+                <h3>Dataset Overview</h3>
+                <p>Total Records: {{ summary_stats.total_rows }}</p>
+                <p>Total Fields: {{ summary_stats.total_columns }}</p>
+            </div>
+            {% for col, stats in summary_stats.numeric_columns.items() %}
+            <div class="stat-card">
+                <h3>{{ col }}</h3>
+                <p>Average: {{ "%.2f"|format(stats.mean) }}</p>
+                <p>Growth: {{ "%.2f"|format(stats.growth) }}%</p>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- AI Question Interface -->
+        <div class="analysis-section">
+            <h2>Ask AI Analyst</h2>
+            <form method="POST" class="ai-form">
+                <input type="text" name="question" placeholder="Ask a business question..." required>
+                <button type="submit">Analyze</button>
+            </form>
+            {% if answer %}
+            <div class="ai-response">
+                <h3>Analysis:</h3>
+                <p>{{ answer }}</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Data Visualization Section -->
+        <div class="visualization-section">
+            <h2>Data Visualizations</h2>
+            {% for plot_name, plot_data in plots.items() %}
+            <div class="plot-container">
+                <div id="{{ plot_name }}"></div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Anomaly Detection -->
+        <div class="anomaly-section">
+            <h2>Anomaly Detection</h2>
+            <div class="outliers-table">
+                {% for col, values in outliers.items() %}
+                <div class="outlier-card">
+                    <h3>{{ col }}</h3>
+                    <p>Detected {{ values|length }} anomalies</p>
+                    <ul>
+                        {% for value in values[:5] %}
+                        <li>{{ value }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Interactive Data Table -->
+        <div class="data-table-section">
+            <h2>Data Explorer</h2>
+            <div id="data-table"></div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize plots
+        {% for plot_name, plot_data in plots.items() %}
+        Plotly.newPlot('{{ plot_name }}', {{ plot_data | safe }});
+        {% endfor %}
+
+        // Initialize interactive table
+        var tableData = {{ sample_data | safe }};
+        var table = new Tabulator("#data-table", {
+            data: tableData,
+            layout: "fitColumns",
+            pagination: "local",
+            paginationSize: 10,
+            columns: [
+                {% for column in columns %}
+                {title: "{{ column }}", field: "{{ column }}"},
+                {% endfor %}
+            ]
+        });
+    </script>
+</body>
+</html>

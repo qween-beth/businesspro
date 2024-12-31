@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Data Analyzer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>AI Data Analyzer</h1>
+        
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST" enctype="multipart/form-data">
+            <div class="upload-section">
+                <label for="file">Upload CSV File:</label>
+                <input type="file" name="file" accept=".csv" required>
+            </div>
+            
+            <div class="question-section">
+                <label for="question">Your Question:</label>
+                <input type="text" name="question" placeholder="e.g., What is the average sales value?">
+                <p class="hint">Example questions:
+                    <ul>
+                        <li>What is the average sales value by product category?</li>
+                        <li>Which region has the highest customer satisfaction rating?</li>
+                        <li>Is there any correlation between units sold and customer satisfaction?</li>
+                        <li>What are the top 3 performing products by total sales?</li>
+                    </ul>
+                </p>
+            </div>
+            
+            <button type="submit">Analyze</button>
+        </form>
+    </div>
+</body>
+</html>

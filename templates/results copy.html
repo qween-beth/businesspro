@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Analysis Results - AI Data Analyzer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Analysis Results</h1>
+        
+        <!-- New Question Form -->
+        <div class="question-form">
+            <h2>Ask Another Question</h2>
+            <form method="POST" class="inline-form">
+                <input type="hidden" name="previous_data" value="true">
+                <div class="question-section">
+                    <input type="text" name="question" placeholder="Ask another question about your data..." required>
+                    <button type="submit">Ask</button>
+                </div>
+                <div class="hint">
+                    <p>Example questions:</p>
+                    <ul>
+                        <li>What is the average sales value by product category?</li>
+                        <li>Which region has the highest customer satisfaction rating?</li>
+                        <li>Is there any correlation between units sold and customer satisfaction?</li>
+                        <li>What are the top 3 performing products by total sales?</li>
+                    </ul>
+                </div>
+            </form>
+        </div>
+        
+        {% if answer %}
+            <div class="answer-section">
+                <h2>AI Analysis:</h2>
+                <p>{{ answer }}</p>
+            </div>
+        {% endif %}
+        
+        <div class="data-preview">
+            <h2>Data Summary</h2>
+            <div class="columns-section">
+                <h3>Available Columns:</h3>
+                <ul>
+                    {% for column in columns %}
+                        <li>{{ column }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            
+            <h3>Sample Data:</h3>
+            {{ sample_data | safe }}
+        </div>
+        
+        <div class="actions">
+            <a href="/" class="button">Analyze New File</a>
+        </div>
+    </div>
+
+    <footer>
+        <p>AI Data Analyzer - Powered by Novron AI</p>
+    </footer>
+</body>
+</html>
