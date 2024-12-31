@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, flash, session, jsonify
+dfrom flask import Flask, render_template, request, flash, session, jsonify
 from data_analyzer import AIDataAnalyzer
 from business_intelligence import BusinessAnalyzer
 import pandas as pd
@@ -42,9 +42,9 @@ def index():
                             continue
                 
                 # Generate business insights
-                summary_stats = business_analyzer.generate_summary_stats(df)
-                outliers = business_analyzer.detect_outliers(df)
-                plots = business_analyzer.generate_plots(df)
+                summary_stats = business_intelligence.generate_summary_stats(df)
+                outliers = business_intelligence.detect_outliers(df)
+                plots = business_intelligence.generate_plots(df)
                 
                 # Store in session
                 session['df'] = df.to_json(date_format='iso')
