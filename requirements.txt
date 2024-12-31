@@ -6,4 +6,4 @@ tabulator
 flask
 gunicorn
 datetime
-dotenv
+
