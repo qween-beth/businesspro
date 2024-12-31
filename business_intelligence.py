@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+import numpy as np
 from dotenv import load_dotenv
 from datetime import datetime
 import json
