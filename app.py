@@ -26,7 +26,7 @@ from json import JSONEncoder
 import uuid
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
-app.json_encoder = CustomJSONEncoder
+
 app.secret_key = os.urandom(24)
 data_analyzer = AIDataAnalyzer()
 business_intelligence = BusinessAnalyzer()
