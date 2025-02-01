@@ -1,17 +1,57 @@
 import pandas as pd
 import os
-import numpy as np
 from dotenv import load_dotenv
 from datetime import datetime
 import json
 import plotly
 import plotly.express as px
 from typing import Dict, List, Any
+import numpy as np
 
 load_dotenv()
 
+    
 class BusinessAnalyzer:
     @staticmethod
+
+    def generate_plots(df: pd.DataFrame) -> Dict[str, str]:
+        
+        """Generate improved business visualizations."""
+        plots = {}
+        
+        # Time series plots with better formatting
+        date_cols = df.select_dtypes(include=['datetime64']).columns
+        if len(date_cols) > 0:
+            date_col = date_cols[0]
+            numeric_cols = df.select_dtypes(include=[np.number]).columns
+            for col in numeric_cols:
+                fig = px.line(df, x=date_col, y=col, 
+                            title=f'{col} Over Time',
+                            template='plotly_white')
+                fig.update_layout(
+                    xaxis_title=date_col,
+                    yaxis_title=col,
+                    showlegend=True,
+                    hovermode='x unified'
+                )
+                plots[f'{col}_trend'] = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+        
+        # Distribution plots with improved styling
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        for col in numeric_cols:
+            fig = px.histogram(df, x=col, 
+                            title=f'Distribution of {col}',
+                            template='plotly_white',
+                            marginal='box')  # Add box plot on the margin
+            fig.update_layout(
+                showlegend=False,
+                bargap=0.1
+            )
+            plots[f'{col}_dist'] = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+        
+        return plots
+
+
     def generate_summary_stats(df: pd.DataFrame) -> Dict[str, Any]:
         """Generate key business metrics and summary statistics."""
         numeric_cols = df.select_dtypes(include=[np.number]).columns

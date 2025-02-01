@@ -1,42 +1,358 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>AI Data Analyzer</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Analytics Dashboard</title>
+    <style>
+        /* General Styles */
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #121212;
+            color: white;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        /* Header */
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 2rem;
+            color: #63b9ff;
+        }
+
+        /* Chat Interface */
+        .chat-container {
+            background-color: #1e1e1e;
+            border-radius: 10px;
+            overflow-y: auto;
+            max-height: 400px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 70%;
+        }
+
+        .user-message {
+            background-color: #343541;
+            align-self: flex-end;
+        }
+
+        .ai-message {
+            background-color: #444654;
+            align-self: flex-start;
+        }
+
+        .loading {
+            text-align: center;
+            color: #63b9ff;
+        }
+
+        /* Input Section */
+        .input-section {
+            display: flex;
+            gap: 10px;
+        }
+
+        .input-section input[type="text"] {
+            flex-grow: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            background-color: #343541;
+            color: white;
+        }
+
+        .input-section button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background-color: #63b9ff;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .input-section button:hover {
+            background-color: #4a90e2;
+        }
+
+        /* File Upload */
+        .file-upload {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .file-upload input[type="file"] {
+            display: none;
+        }
+
+        .file-upload label {
+            display: inline-block;
+            padding: 10px 20px;
+            border: 2px dashed #63b9ff;
+            border-radius: 5px;
+            color: #63b9ff;
+            cursor: pointer;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .file-upload label:hover {
+            background-color: #63b9ff;
+            color: white;
+        }
+
+        /* Buttons */
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .button-group button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background-color: #63b9ff;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .button-group button:hover {
+            background-color: #4a90e2;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
-        <h1>AI Data Analyzer</h1>
-        
-        {% with messages = get_flashed_messages() %}
-            {% if messages %}
-                {% for message in messages %}
-                    <div class="alert">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
+        <!-- Header -->
+        <header>
+            <h1>AI Analytics Dashboard</h1>
+            <p>Hello! I'm your AI analytics assistant. Upload a CSV file to begin analysis.</p>
+        </header>
 
-        <form method="POST" enctype="multipart/form-data">
-            <div class="upload-section">
-                <label for="file">Upload CSV File:</label>
-                <input type="file" name="file" accept=".csv" required>
+        <!-- File Upload -->
+        <div class="file-upload">
+            <label for="csv-file">Drag and drop your CSV file here or click to browse</label>
+            <input type="file" id="csv-file" accept=".csv" />
+            <p id="upload-status"></p>
+        </div>
+
+        <!-- Analysis Buttons -->
+        <div class="button-group">
+            <button onclick="analyzeData()">Analyze Data Distribution</button>
+            <button onclick="showCorrelation()">Show Correlation Matrix</button>
+            <button onclick="generateSummary()">Generate Summary Statistics</button>
+            <button onclick="identifyTrends()">Identify Trends</button>
+        </div>
+
+        <!-- Chat Interface -->
+        <div class="chat-container" id="chat-container">
+            <div class="message ai-message">
+                Upload a CSV file and start analyzing your data!
             </div>
-            
-            <div class="question-section">
-                <label for="question">Your Question:</label>
-                <input type="text" name="question" placeholder="e.g., What is the average sales value?">
-                <p class="hint">Example questions:
-                    <ul>
-                        <li>What is the average sales value by product category?</li>
-                        <li>Which region has the highest customer satisfaction rating?</li>
-                        <li>Is there any correlation between units sold and customer satisfaction?</li>
-                        <li>What are the top 3 performing products by total sales?</li>
-                    </ul>
-                </p>
-            </div>
-            
-            <button type="submit">Analyze</button>
-        </form>
+        </div>
+
+        <!-- Input Section -->
+        <div class="input-section">
+            <input type="text" id="question-input" placeholder="Ask me anything about your data..." />
+            <button onclick="askQuestion()">Ask</button>
+        </div>
     </div>
+
+    <script>
+        // File Upload Handling
+        document.getElementById('csv-file').addEventListener('change', function (event) {
+            const file = event.target.files[0];
+            if (!file || !file.name.endsWith('.csv')) {
+                document.getElementById('upload-status').textContent = 'Please upload a valid CSV file.';
+                return;
+            }
+
+            if (file.size > 10 * 1024 * 1024) { // Limit file size to 10MB
+                document.getElementById('upload-status').textContent = 'File size exceeds the limit (10MB).';
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            document.getElementById('upload-status').textContent = 'Uploading...'; // Show loading message
+
+            fetch('/api/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    document.getElementById('upload-status').textContent = `Error: ${data.error}`;
+                } else {
+                    document.getElementById('upload-status').textContent = 'File uploaded successfully!';
+                    this.value = ''; // Clear the input field
+                }
+            })
+            .catch(error => {
+                document.getElementById('upload-status').textContent = 'An error occurred during upload.';
+            });
+        });
+
+        // Add Message to Chat
+        function addMessage(sender, message, loading = false) {
+            const container = document.getElementById('chat-container');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${sender}-message`;
+            if (loading) {
+                msgDiv.textContent = 'Loading...';
+            } else {
+                msgDiv.innerHTML = `<p>${message}</p>`;
+            }
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // Analyze Data Distribution
+        function analyzeData() {
+            addMessage('user', 'Analyze data distribution');
+            addMessage('ai', '', true);
+            fetch('/api/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: 'Analyze data distribution' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                let result = `<p>${data.answer}</p>`;
+                if (data.visualizations && data.visualizations.length > 0) {
+                    const plotDiv = document.createElement('div');
+                    Plotly.newPlot(plotDiv, data.visualizations[0].data.data, data.visualizations[0].data.layout);
+                    result += plotDiv.outerHTML;
+                }
+                addMessage('ai', result);
+            })
+            .catch(error => {
+                addMessage('ai', 'An error occurred while processing your request.');
+            });
+        }
+
+        // Show Correlation Matrix
+        function showCorrelation() {
+            addMessage('user', 'Show correlation matrix');
+            addMessage('ai', '', true);
+            fetch('/api/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: 'Show correlation matrix' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                let result = `<p>${data.answer}</p>`;
+                if (data.visualizations && data.visualizations.length > 0) {
+                    const plotDiv = document.createElement('div');
+                    Plotly.newPlot(plotDiv, data.visualizations[0].data.data, data.visualizations[0].data.layout);
+                    result += plotDiv.outerHTML;
+                }
+                addMessage('ai', result);
+            })
+            .catch(error => {
+                addMessage('ai', 'An error occurred while processing your request.');
+            });
+        }
+
+        // Generate Summary Statistics
+        function generateSummary() {
+            addMessage('user', 'Generate summary statistics');
+            addMessage('ai', '', true);
+            fetch('/api/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: 'Generate summary statistics' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                addMessage('ai', `<pre>${data.answer}</pre>`);
+            })
+            .catch(error => {
+                addMessage('ai', 'An error occurred while processing your request.');
+            });
+        }
+
+        // Identify Trends
+        function identifyTrends() {
+            addMessage('user', 'Identify trends');
+            addMessage('ai', '', true);
+            fetch('/api/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: 'Identify trends' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                let result = `<p>${data.answer}</p>`;
+                if (data.visualizations && data.visualizations.length > 0) {
+                    const plotDiv = document.createElement('div');
+                    Plotly.newPlot(plotDiv, data.visualizations[0].data.data, data.visualizations[0].data.layout);
+                    result += plotDiv.outerHTML;
+                }
+                addMessage('ai', result);
+            })
+            .catch(error => {
+                addMessage('ai', 'An error occurred while processing your request.');
+            });
+        }
+
+
+        // Ask Question
+        function askQuestion() {
+            const question = document.getElementById('question-input').value.trim();
+            if (!question) {
+                alert('Please enter a question.');
+                return;
+            }
+
+            addMessage('user', question);
+            addMessage('ai', '', true);
+            fetch('/api/ask', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question })
+            })
+            .then(response => response.json())
+            .then(data => {
+                let result = `<p>${data.answer}</p>`;
+                if (data.plot) {
+                    const plotDiv = document.createElement('div');
+                    Plotly.newPlot(plotDiv, data.plot.data, data.plot.layout);
+                    result += plotDiv.outerHTML;
+                }
+                addMessage('ai', result);
+            })
+            .catch(error => {
+                addMessage('ai', 'An error occurred while processing your request.');
+            });
+        }
+    </script>
+
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 </body>
 </html>

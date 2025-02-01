@@ -87,6 +87,7 @@
 
     <script>
         // Initialize plots
+        
         {% for plot_name, plot_data in plots.items() %}
         Plotly.newPlot('{{ plot_name }}', {{ plot_data | safe }});
         {% endfor %}
