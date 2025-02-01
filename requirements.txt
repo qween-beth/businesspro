@@ -8,3 +8,7 @@ gunicorn
 datetime
 python-dotenv
 groq
+dotenv
+scikit-learn 
+seaborn
+matplotlib
