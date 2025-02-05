@@ -2,6 +2,7 @@ from flask import Flask, send_file, make_response, render_template, request, fla
 from data_analyzer import AIDataAnalyzer
 from io import StringIO
 from business_intelligence import BusinessAnalyzer
+from perform_initial_analysis import perform_initial_analysis 
 import pandas as pd
 import numpy as np
 import tempfile
@@ -22,14 +23,29 @@ import os
 import io
 import functools
 from typing import Tuple, Dict, Any, Union, Optional, List
-from json import JSONEncoder
 import uuid
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (np.integer, np.floating, np.bool_)):
+            return obj.item()
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif pd.isna(obj):
+            return None
+        elif isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        return super().default(obj)
+
+
+
 app.secret_key = os.urandom(24)
 data_analyzer = AIDataAnalyzer()
 business_intelligence = BusinessAnalyzer()
+
+app.json_encoder = CustomJSONEncoder
 
 # App configuration
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB limit
@@ -101,9 +117,6 @@ def handle_analysis_error(func):
             print(f"Unexpected error in {func.__name__}: {str(e)}")
             return jsonify({'error': 'An unexpected error occurred'}), 500
     return wrapper
-
-# Initialize handlers
-file_handler = FileHandler(app)
 
 
 class DateHandler:
@@ -230,27 +243,6 @@ class DateHandler:
         return df
 
 
-
-class CustomJSONEncoder(json.JSONEncoder):
-    def default(self, obj):
-        # Handle NaN values
-        if pd.isna(obj):
-            return None
-
-        # Handle NumPy types
-        if isinstance(obj, (np.integer, np.floating, np.bool_)):
-            return obj.item()
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-
-        # Handle Plotly figures
-        if isinstance(obj, Figure):
-            return json.loads(plotly.utils.PlotlyJSONEncoder().encode(obj))
-
-        # Fallback to the parent class's default method
-        return super().default(obj)
-
-
     
 def handle_file_upload(file) -> pd.DataFrame:
     """
@@ -284,215 +276,31 @@ def cleanup(exception=None):
     if has_request_context() and 'session_id' in session:
         file_handler.cleanup_temp_file(session['session_id'])
 
-# @atexit.register
-# def cleanup_all():
-#     """Clean up all temporary files when the application shuts down."""
-#     file_handler.cleanup_all()
+def extract_columns(question, df):
+    """Extract relevant column names from the question."""
+    cols = [col.lower() for col in df.columns]
+    return [col for col in cols if col in question.lower()]
 
-def generate_appropriate_plot(df: pd.DataFrame, question: str) -> Union[str, None]:
-    """
-    Generate an appropriate plot based on the question and data characteristics.
-    
-    Args:
-        df (pd.DataFrame): Input DataFrame containing the data to plot
-        question (str): User question/prompt to determine plot type
-    
-    Returns:
-        Union[str, None]: JSON string of the plotly figure or None if no suitable plot can be generated
-    """
-    try:
-        # Common layout settings
-        layout_settings = dict(
-            height=500,  # Taller default height
-            margin=dict(t=50, r=20, b=40, l=60),
-            font=dict(size=12),
-            title_font=dict(size=16),
-            showlegend=True,
-            legend=dict(
-                yanchor="top",
-                y=0.99,
-                xanchor="left",
-                x=0.01
-            ),
-            template="plotly_white"  # Clean, professional template
-        )
+def generate_trend_plot(df):
+    """Generate time series plot if applicable."""
+    date_cols = df.select_dtypes(include=['datetime64']).columns
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
 
-        # Time series plot
-        if any(word in question.lower() for word in ['trend', 'time', 'over time']):
-            date_cols = df.select_dtypes(include=['datetime64']).columns
-            if len(date_cols) > 0:
-                numeric_cols = df.select_dtypes(include=[np.number]).columns
-                if len(numeric_cols) > 0:
-                    fig = px.line(df, x=date_cols[0], y=numeric_cols[0],
-                                title=f'Trend of {numeric_cols[0]} Over Time')
-                    
-                    # Enhance line appearance
-                    fig.update_traces(
-                        line=dict(width=2),
-                        mode='lines+markers',
-                        marker=dict(
-                            size=6,
-                            line=dict(width=1, color='DarkSlateGrey')
-                        )
-                    )
-                    
-                    fig.update_layout(
-                        **layout_settings,
-                        xaxis=dict(
-                            title_standoff=15,
-                            tickfont=dict(size=12),
-                            title_font=dict(size=14),
-                            gridcolor='lightgray'
-                        ),
-                        yaxis=dict(
-                            title_standoff=15,
-                            tickfont=dict(size=12),
-                            title_font=dict(size=14),
-                            gridcolor='lightgray'
-                        )
-                    )
-                    
-                    return json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+    if not date_cols or not numeric_cols:
+        return []  # Return an empty list if no valid columns are found
 
-        # Distribution plot
-        if any(word in question.lower() for word in ['distribution', 'spread', 'histogram']):
-            numeric_cols = df.select_dtypes(include=[np.number]).columns
-            if len(numeric_cols) > 0:
-                fig = px.histogram(df, x=numeric_cols[0],
-                                 title=f'Distribution of {numeric_cols[0]}',
-                                 marginal='box',  # Add box plot on top
-                                 histnorm='probability density',  # Normalize histogram
-                                 color_discrete_sequence=['rgb(67, 147, 195)'])
-                
-                fig.update_layout(
-                    **layout_settings,
-                    bargap=0.1,  # Add gap between bars
-                    xaxis=dict(
-                        title_standoff=15,
-                        tickfont=dict(size=12),
-                        title_font=dict(size=14)
-                    ),
-                    yaxis=dict(
-                        title="Density",
-                        title_standoff=15,
-                        tickfont=dict(size=12),
-                        title_font=dict(size=14)
-                    )
-                )
-                
-                return json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+    fig = px.line(df, x=date_cols[0], y=numeric_cols[0], title=f'Trend of {numeric_cols[0]} Over Time')
+    return [{'type': 'plot', 'data': json.loads(json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder))}]
 
-        # Correlation/Scatter plot
-        if any(word in question.lower() for word in ['correlation', 'relationship', 'scatter']):
-            numeric_cols = df.select_dtypes(include=[np.number]).columns
-            if len(numeric_cols) >= 2:
-                fig = px.scatter(df, x=numeric_cols[0], y=numeric_cols[1],
-                               title=f'Relationship between {numeric_cols[0]} and {numeric_cols[1]}',
-                               trendline='ols',  # Add trend line
-                               trendline_color_override='red')
-                
-                fig.update_traces(
-                    marker=dict(
-                        size=8,
-                        opacity=0.7,
-                        line=dict(width=1, color='DarkSlateGrey')
-                    )
-                )
-                
-                fig.update_layout(
-                    **layout_settings,
-                    xaxis=dict(
-                        title_standoff=15,
-                        tickfont=dict(size=12),
-                        title_font=dict(size=14),
-                        gridcolor='lightgray'
-                    ),
-                    yaxis=dict(
-                        title_standoff=15,
-                        tickfont=dict(size=12),
-                        title_font=dict(size=14),
-                        gridcolor='lightgray'
-                    )
-                )
-                
-                return json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
-
-        # Bar plot for categorical comparisons
-        if any(word in question.lower() for word in ['compare', 'comparison', 'differences']):
-            categorical_cols = df.select_dtypes(include=['object', 'category']).columns
-            numeric_cols = df.select_dtypes(include=[np.number]).columns
-            
-            if len(categorical_cols) > 0 and len(numeric_cols) > 0:
-                fig = px.bar(df, x=categorical_cols[0], y=numeric_cols[0],
-                           title=f'{numeric_cols[0]} by {categorical_cols[0]}',
-                           color_discrete_sequence=['rgb(67, 147, 195)'])
-                
-                fig.update_layout(
-                    **layout_settings,
-                    xaxis=dict(
-                        title_standoff=15,
-                        tickfont=dict(size=12),
-                        title_font=dict(size=14),
-                        categoryorder='total descending'  # Sort bars by value
-                    ),
-                    yaxis=dict(
-                        title_standoff=15,
-                        tickfont=dict(size=12),
-                        title_font=dict(size=14),
-                        gridcolor='lightgray'
-                    )
-                )
-                
-                fig.update_traces(
-                    marker_line_color='DarkSlateGrey',
-                    marker_line_width=1
-                )
-                
-                return json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
-
-        return None
-
-    except Exception as e:
-        print(f"Error generating plot: {str(e)}")
-        return None
-    
-def handle_ajax_request() -> Dict[str, Any]:
-    """Handle AJAX requests for real-time analysis."""
-    try:
-        data = request.get_json()
-        question = data.get('question')
-        
-        if not question:
-            return jsonify({'error': 'No question provided'}), 400
-            
-        if 'temp_file_path' not in session:
-            return jsonify({'error': 'Please upload a file first'}), 400
-            
-        # Load the data
-        df = pd.read_csv(session['temp_file_path'])
-        df = DateHandler.parse_dates(df)  # Use the date parser we created earlier
-        
-        # Get AI analysis
-        context = data_analyzer.prepare_data_context(df)
-        answer = data_analyzer.ask_groq(question, context)
-        
-        # Check if visualization is needed
-        plot_data = None
-        if any(keyword in question.lower() for keyword in 
-               ['trend', 'plot', 'graph', 'visualize', 'show', 'distribution']):
-            try:
-                plot_data = generate_appropriate_plot(df, question)
-            except Exception as e:
-                print(f"Plot generation error: {str(e)}")
-        
-        return jsonify({
-            'success': True,
-            'answer': answer,
-            'plot': plot_data
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+def generate_distribution_plot(df):
+    """Generate distribution plot if applicable."""
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    if len(numeric_cols) > 0:
+        fig = px.histogram(df, x=numeric_cols[0],
+                          title=f'Distribution of {numeric_cols[0]}',
+                          marginal='box')
+        return [{'type': 'plot', 'data': json.loads(json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder))}]
+    return []
 
 def generate_summary_stats(df):
     """Generate summary statistics for numerical columns."""
@@ -504,7 +312,7 @@ def detect_outliers(df):
     """Detect outliers using IQR method."""
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     outliers = {}
-    
+
     for col in numeric_cols:
         Q1 = df[col].quantile(0.25)
         Q3 = df[col].quantile(0.75)
@@ -513,128 +321,189 @@ def detect_outliers(df):
         upper_bound = Q3 + 1.5 * IQR
         outliers[col] = {
             'count': len(df[(df[col] < lower_bound) | (df[col] > upper_bound)]),
-            'lower_bound': lower_bound,
-            'upper_bound': upper_bound
+            'lower_bound': float(lower_bound),
+            'upper_bound': float(upper_bound)
         }
     
     return outliers
 
-def generate_correlation_matrix(df):
-    """Generate correlation matrix for numerical columns."""
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    if len(numeric_cols) > 1:
-        corr_matrix = df[numeric_cols].corr()
-        return corr_matrix.to_dict()
-    return {}
-
-def generate_plots(df):
-    """Generate various plots based on data types."""
-    plots = []
-    
-    # Distribution plots for numeric columns
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    for col in numeric_cols[:5]:  # Limit to first 5 columns
-        fig = px.histogram(df, x=col, title=f'Distribution of {col}')
-        plots.append({
-            'type': 'plot',
-            'data': json.loads(plotly.utils.PlotlyJSONEncoder().encode(fig))
-        })
-    
-    # Time series plots if date columns exist
-    date_cols = df.select_dtypes(include=['datetime64']).columns
-    if len(date_cols) > 0 and len(numeric_cols) > 0:
-        date_col = date_cols[0]
-        numeric_col = numeric_cols[0]
-        fig = px.line(df, x=date_col, y=numeric_col, 
-                     title=f'Time Series: {numeric_col} over {date_col}')
-        plots.append({
-            'type': 'plot',
-            'data': json.loads(plotly.utils.PlotlyJSONEncoder().encode(fig))
-        })
-    
-    return plots
-
 def analyze_question(df, question):
-    """Analyze data based on user question."""
-    question = question.lower()
-    response = {'answer': '', 'visualizations': []}
-    
-    # Extract column names from the question
-    def extract_columns(question, df):
-        cols = [col.lower() for col in df.columns]
-        return [col for col in cols if col in question]
-    
-    extracted_cols = extract_columns(question, df)
-    
-    # Time series analysis
-    if any(word in question for word in ['trend', 'over time', 'time series']):
-        date_cols = df.select_dtypes(include=['datetime64']).columns
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
+    """Enhanced analysis function with better question handling and visualization."""
+    try:
+        question = question.lower()
+        response = {
+            'answer': '',
+            'visualizations': [],
+            'data': {}
+        }
+
+        # Handle correlation analysis
+        if any(word in question for word in ['correlation', 'correlate', 'relationship']):
+            numeric_cols = df.select_dtypes(include=[np.number]).columns
+            if len(numeric_cols) >= 2:
+                corr_matrix = df[numeric_cols].corr()
+                
+                # Create correlation heatmap
+                fig = px.imshow(
+                    corr_matrix,
+                    labels=dict(color="Correlation Coefficient"),
+                    title="Correlation Matrix",
+                    color_continuous_scale="RdBu"
+                )
+                
+                # Properly serialize the Plotly figure
+                response['visualizations'].append({
+                    'type': 'plot',
+                    'data': json.loads(fig.to_json())
+                })
+                
+                # Add correlation insights
+                strong_correlations = []
+                for i in range(len(numeric_cols)):
+                    for j in range(i+1, len(numeric_cols)):
+                        corr = corr_matrix.iloc[i,j]
+                        if abs(corr) > 0.5:
+                            strong_correlations.append(
+                                f"{numeric_cols[i]} and {numeric_cols[j]}: {corr:.2f}"
+                            )
+                
+                response['answer'] = "Here's the correlation analysis:\n"
+                if strong_correlations:
+                    response['answer'] += "\nStrong correlations found:\n- " + "\n- ".join(strong_correlations)
+                else:
+                    response['answer'] += "\nNo strong correlations found between numeric variables."
+
+        # Handle category comparisons
+        elif any(word in question for word in ['compare', 'comparison', 'categories', 'categorical']):
+            categorical_cols = df.select_dtypes(include=['object', 'category']).columns
+            numeric_cols = df.select_dtypes(include=[np.number]).columns
+            
+            if len(categorical_cols) > 0 and len(numeric_cols) > 0:
+                cat_col = categorical_cols[0]
+                num_col = numeric_cols[0]
+                
+                # Calculate summary statistics by category
+                summary = df.groupby(cat_col)[num_col].agg(['mean', 'count', 'std']).round(2)
+                
+                # Create comparison bar plot
+                fig = px.bar(
+                    df,
+                    x=cat_col,
+                    y=num_col,
+                    title=f'{num_col} by {cat_col}',
+                    labels={cat_col: cat_col.replace('_', ' ').title(), 
+                           num_col: num_col.replace('_', ' ').title()},
+                    color=cat_col
+                )
+                
+                # Properly serialize the Plotly figure
+                response['visualizations'].append({
+                    'type': 'plot',
+                    'data': json.loads(fig.to_json())
+                })
+                
+                response['answer'] = f"Comparison of {num_col} across {cat_col} categories:\n\n"
+                response['answer'] += "Summary statistics by category:\n"
+                response['answer'] += str(summary)
+                
+                highest_cat = summary.nlargest(1, 'mean').index[0]
+                lowest_cat = summary.nsmallest(1, 'mean').index[0]
+                response['answer'] += f"\n\nKey findings:\n"
+                response['answer'] += f"- Highest average {num_col}: {highest_cat}\n"
+                response['answer'] += f"- Lowest average {num_col}: {lowest_cat}\n"
+
+        # Handle trend analysis
+        elif any(word in question for word in ['trend', 'trends', 'over time']):
+            date_cols = df.select_dtypes(include=['datetime64']).columns
+            numeric_cols = df.select_dtypes(include=[np.number]).columns
+            
+            if len(date_cols) > 0 and len(numeric_cols) > 0:
+                date_col = date_cols[0]
+                num_col = numeric_cols[0]
+                
+                # Create trend line plot
+                fig = px.line(
+                    df,
+                    x=date_col,
+                    y=num_col,
+                    title=f'Trend of {num_col} Over Time'
+                )
+                
+                # Properly serialize the Plotly figure
+                response['visualizations'].append({
+                    'type': 'plot',
+                    'data': json.loads(fig.to_json())
+                })
+                
+                first_value = df[num_col].iloc[0]
+                last_value = df[num_col].iloc[-1]
+                percent_change = ((last_value - first_value) / first_value) * 100
+                
+                response['answer'] = f"Trend analysis for {num_col}:\n"
+                response['answer'] += f"- Overall change: {percent_change:.1f}%\n"
+                response['answer'] += f"- Starting value: {first_value:.2f}\n"
+                response['answer'] += f"- Ending value: {last_value:.2f}\n"
+
+        else:
+            response['answer'] = "I can help you analyze:\n- Correlations between variables\n- Compare categories\n- Identify trends over time\nPlease specify what you'd like to analyze."
+
+        return response
+
+    except Exception as e:
+        print(f"Error in analyze_question: {str(e)}")
+        return {
+            'answer': f'An error occurred while analyzing the data: {str(e)}',
+            'visualizations': []
+        }
+
+
+def handle_ajax_request() -> Dict[str, Any]:
+    """Handle AJAX requests for real-time analysis."""
+    try:
+        data = request.get_json()
+        question = data.get('question')
+
+        if not question:
+            return jsonify({'error': 'No question provided'}), 400
+
+        if 'temp_file_path' not in session:
+            return jsonify({'error': 'Please upload a file first'}), 400
+
+        # Load the data
+        df = pd.read_csv(session['temp_file_path'])
+        df = DateHandler.parse_dates(df)
+
+        # Get AI analysis (assuming you have defined ask_groq and prepare_data_context elsewhere)
+        context = data_analyzer.prepare_data_context(df)
+        answer = data_analyzer.ask_groq(question, context)
+
+        # Check if visualization is needed
+        plot_data = generate_appropriate_plot(df, question)
         
-        if len(date_cols) > 0 and len(numeric_cols) > 0:
-            date_col = date_cols[0]
-            numeric_col = extracted_cols[0] if extracted_cols else numeric_cols[0]
-            fig = px.line(df, x=date_col, y=numeric_col,
-                         title=f'Trend Analysis: {numeric_col} over time')
-            response['visualizations'].append({
-                'type': 'plot',
-                'data': json.loads(plotly.utils.PlotlyJSONEncoder().encode(fig))
-            })
-            response['answer'] = f"Showing trend analysis for {numeric_col} over time."
-        else:
-            response['answer'] = "Unable to perform trend analysis. Ensure your dataset contains date and numeric columns."
-    
-    # Distribution analysis
-    elif any(word in question for word in ['distribution', 'spread', 'histogram']):
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
-        if len(numeric_cols) > 0:
-            col = extracted_cols[0] if extracted_cols else numeric_cols[0]
-            fig = px.histogram(df, x=col, title=f'Distribution of {col}')
-            response['visualizations'].append({
-                'type': 'plot',
-                'data': json.loads(plotly.utils.PlotlyJSONEncoder().encode(fig))
-            })
-            response['answer'] = f"Showing distribution analysis for {col}."
-        else:
-            response['answer'] = "Unable to perform distribution analysis. Ensure your dataset contains numeric columns."
-    
-    # Correlation analysis
-    elif any(word in question for word in ['correlation', 'relationship', 'compare']):
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
-        if len(numeric_cols) >= 2:
-            col1, col2 = extracted_cols[:2] if len(extracted_cols) >= 2 else (numeric_cols[0], numeric_cols[1])
-            fig = px.scatter(df, x=col1, y=col2,
-                           title=f'Correlation: {col1} vs {col2}')
-            response['visualizations'].append({
-                'type': 'plot',
-                'data': json.loads(plotly.utils.PlotlyJSONEncoder().encode(fig))
-            })
-            response['answer'] = f"Showing correlation between {col1} and {col2}."
-        else:
-            response['answer'] = "Unable to perform correlation analysis. Ensure your dataset contains at least two numeric columns."
-    
-    # Summary statistics
-    elif any(word in question for word in ['summary', 'statistics', 'stats']):
-        try:
-            summary = generate_summary_stats(df)
-            response['answer'] = f"Here are the summary statistics:\n{json.dumps(summary, indent=2)}"
-        except Exception as e:
-            response['answer'] = f"Error generating summary statistics: {str(e)}"
-    
-    else:
-        response['answer'] = "I'm not sure how to analyze that. Try asking about trends, distributions, correlations, or summary statistics."
-    
-    return response
+        return jsonify({
+            'success': True,
+            'answer': answer,
+            'plot': plot_data
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
-# Add this to other routes that return DataFrame-based JSON
+
+
 def prepare_dataframe_for_json(df):
-    """Helper function to prepare DataFrame for JSON serialization"""
-    return df.replace({np.nan: None}).to_dict('records')
+    """Helper function to prepare DataFrame or dict for JSON serialization"""
+    if isinstance(df, pd.DataFrame):
+        return df.replace({np.nan: None}).to_dict('records')
+    elif isinstance(df, dict):
+        # You can choose how you want to handle dict objects here
+        # For example, if you need to convert a dict to a DataFrame first:
+        return pd.DataFrame([df]).replace({np.nan: None}).to_dict('records')
+    else:
+        raise TypeError(f"Expected a pandas DataFrame or dict, got {type(df)}")
 
-
-# Register the custom JSON encoder with Flask
-app.json_encoder = CustomJSONEncoder
+# Initialize handlers
+file_handler = FileHandler(app)
 
 @app.route('/')
 def index():
@@ -642,73 +511,76 @@ def index():
 
 
 @app.route('/api/upload', methods=['POST'])
-@handle_analysis_error
-def handle_upload():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-    
-    if not file.filename.endswith('.csv'):
-        return jsonify({'error': 'Please upload a CSV file'}), 400
-
-    # Get or create session ID
-    session_id = get_session_id()
-
-    # Process the file using chunked reading for large files
-    chunks = []
+def upload_file():
     try:
-        for chunk in pd.read_csv(file, chunksize=10000):
-            chunks.append(chunk)
-        df = pd.concat(chunks, ignore_index=True)
-    except pd.errors.EmptyDataError:
-        raise AnalysisError('The uploaded file is empty')
+        print("DEBUG: Upload request received.")
+
+        if 'file' not in request.files:
+            print("DEBUG: No file part in request.")
+            return jsonify({'error': 'No file part'}), 400
+
+        file = request.files['file']
+
+        if file.filename == '':
+            print("DEBUG: No file selected.")
+            return jsonify({'error': 'No file selected'}), 400
+
+        if not file.filename.endswith('.csv'):
+            print("DEBUG: Invalid file format.")
+            return jsonify({'error': 'Invalid file format. Please upload a CSV file.'}), 400
+
+        print("DEBUG: File validated. Reading CSV file...")
+
+        chunks = []
+        try:
+            for chunk in pd.read_csv(file, chunksize=10000, encoding='utf-8', on_bad_lines='skip'):
+                chunks.append(chunk)
+
+            if not chunks:
+                print("DEBUG: CSV file is empty after reading.")
+                return jsonify({'error': 'The uploaded file is empty'}), 400
+
+            df = pd.concat(chunks, ignore_index=True)
+
+        except pd.errors.EmptyDataError:
+            print("DEBUG: Pandas detected empty CSV file.")
+            return jsonify({'error': 'The uploaded file is empty'}), 400
+        except pd.errors.ParserError:
+            print("DEBUG: CSV file parsing error.")
+            return jsonify({'error': 'Error parsing the CSV file. Ensure it is properly formatted.'}), 400
+        except Exception as e:
+            print(f"DEBUG: Unexpected error reading CSV file - {str(e)}")
+            return jsonify({'error': f'Error reading file: {str(e)}'}), 500
+
+        print("DEBUG: CSV file successfully read. Checking for valid data.")
+
+        # Parse dates
+        df = DateHandler.parse_dates(df)
+        print("DEBUG: Date parsing completed.")
+
+        session_id = get_session_id()
+        temp_file_path = file_handler.save_temp_file(df, session_id)
+        session['temp_file_path'] = temp_file_path
+
+        print(f"DEBUG: File saved to temporary location: {temp_file_path}")
+
+        # Perform initial analysis
+        initial_analysis_response = perform_initial_analysis(df)
+
+        # Include success message
+        initial_analysis_response['message'] = 'File uploaded successfully!'
+
+        # 🔥 Fix: Convert response using `json.dumps()` and CustomJSONEncoder
+        return app.response_class(
+            response=json.dumps(initial_analysis_response, cls=CustomJSONEncoder),
+            status=200,
+            mimetype='application/json'
+        )
+
     except Exception as e:
-        raise AnalysisError(f'Error reading file: {str(e)}')
+        print(f"DEBUG: Upload Error - {e}")
+        return jsonify({'error': str(e)}), 500
 
-    # Process dates
-    df = DateHandler.parse_dates(df)
-    
-    # Save to temp file using FileHandler with session ID
-    temp_file_path = file_handler.save_temp_file(df, session_id)
-    session['temp_file_path'] = temp_file_path
-
-    # Generate initial analysis
-    summary_stats = generate_summary_stats(df)
-    outliers = detect_outliers(df)
-    plots = generate_plots(df)
-    
-    # Handle NaN values in the DataFrame before converting to dict
-    df_dict = df.head(100).replace({np.nan: None}).to_dict('records')
-    
-    response_data = {
-        'success': True,
-        'data': df_dict,
-        'columns': df.columns.tolist(),
-        'preview': df.head().to_html(classes='table table-striped'),
-        'stats': {
-            'rows': len(df),
-            'columns': len(df.columns),
-            'size': f"{df.memory_usage(deep=True).sum() / 1024 / 1024:.2f} MB"
-        },
-        'summary_stats': {
-            k: {col: (None if pd.isna(v) else v) for col, v in stats.items()} 
-            for k, stats in summary_stats.items()
-        },
-        'outliers': {
-            k: {
-                'count': v['count'],
-                'lower_bound': None if pd.isna(v['lower_bound']) else v['lower_bound'],
-                'upper_bound': None if pd.isna(v['upper_bound']) else v['upper_bound']
-            }
-            for k, v in outliers.items()
-        },
-        'visualizations': plots
-    }
-    
-    return jsonify(response_data)
 
 
 @app.route('/api/analyze', methods=['POST'])
@@ -717,6 +589,7 @@ def analyze():
         if 'temp_file_path' not in session:
             return jsonify({'error': 'No data uploaded'}), 400
             
+        # Load the CSV and parse dates
         df = pd.read_csv(session['temp_file_path'])
         df = DateHandler.parse_dates(df)
         
@@ -726,39 +599,47 @@ def analyze():
         if not question:
             return jsonify({'error': 'No question provided'}), 400
         
+        # Get the analysis response
         response = analyze_question(df, question)
         
-        # Ensure any DataFrame data in response is properly converted
-        if 'data' in response:
-            response['data'] = prepare_dataframe_for_json(response['data'])
-            
-        return jsonify(response)
+        # Return the response using the CustomJSONEncoder
+        return app.response_class(
+            response=json.dumps(response, cls=CustomJSONEncoder),
+            status=200,
+            mimetype='application/json'
+        )
         
     except Exception as e:
         print(f"Analysis Error: {e}")
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/initial-analysis', methods=['POST'])
-def initial_analysis():
+
+
+@app.route('/api/correlation', methods=['GET'])
+def get_correlation():
+    """Dedicated endpoint for correlation matrix."""
     try:
         if 'temp_file_path' not in session:
             return jsonify({'error': 'No data uploaded'}), 400
             
         df = pd.read_csv(session['temp_file_path'])
-        df = DateHandler.parse_dates(df)
         
-        # Generate initial visualizations
-        plots = generate_plots(df)
+        # Generate correlation matrix
+        correlation_matrix = generate_correlation_matrix(df)
+        
+        if not correlation_matrix:
+            return jsonify({'error': 'No correlation matrix available'}), 400
+        
+        numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
         
         return jsonify({
-            'visualizations': plots
+            'correlation_matrix': correlation_matrix,
+            'numeric_columns': numeric_columns
         })
         
     except Exception as e:
-        print(f"Initial Analysis Error: {e}")
         return jsonify({'error': str(e)}), 500
-
 
 
 
@@ -769,41 +650,44 @@ def ask_question():
         if 'temp_file_path' not in session:
             return jsonify({'error': 'No data uploaded yet'}), 400
 
+        temp_file_path = session.get('temp_file_path')
+        
+        # Ensure the file path is valid
+        if not temp_file_path or not os.path.exists(temp_file_path):
+            return jsonify({'error': 'Data file not found'}), 400
+
         question = request.json.get('question')
         if not question:
             return jsonify({'error': 'No question provided'}), 400
 
-        # Load the data
-        df = pd.read_csv(session['temp_file_path'])
-        df = DateHandler.parse_dates(df)  # Ensure dates are parsed
+        # Load the data safely
+        try:
+            df = pd.read_csv(temp_file_path)
+            df = DateHandler.parse_dates(df)  # Ensure dates are parsed
+        except Exception as e:
+            return jsonify({'error': f'Error loading data: {str(e)}'}), 500
 
-        # Prepare context and get answer
-        context = data_analyzer.prepare_data_context(df)
-        answer = data_analyzer.ask_groq(question, context)
+        # Analyze the question
+        response = analyze_question(df, question)
 
-        # Generate a visualization if appropriate
+        # Ensure there is a valid answer
+        answer = response.get('answer', 'No answer generated.')
+
+        # Handle visualization safely
         plot_data = None
-        if any(keyword in question.lower() for keyword in ['trend', 'plot', 'graph', 'visualize', 'show']):
+        if 'visualizations' in response and response['visualizations']:
             try:
-                # Simple time series plot for numeric columns
-                date_cols = df.select_dtypes(include=['datetime64']).columns
-                if len(date_cols) > 0:
-                    numeric_cols = df.select_dtypes(include=[np.number]).columns
-                    if len(numeric_cols) > 0:
-                        fig = px.line(df, x=date_cols[0], y=numeric_cols[0], 
-                                    title=f'{numeric_cols[0]} Over Time')
-                        plot_data = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
-
+                plot_data = json.dumps(response['visualizations'][0]['data'], cls=plotly.utils.PlotlyJSONEncoder)
             except Exception as e:
-                print(f"Error generating plot: {str(e)}")
+                plot_data = None  # Ensure no crash on JSON encoding errors
+                print(f"DEBUG: Plot serialization error - {e}")
 
-        return jsonify({
-            'answer': answer,
-            'plot': plot_data
-        })
+        return jsonify({'answer': answer, 'plot': plot_data})
 
     except Exception as e:
+        print(f"DEBUG: API Error - {e}")
         return jsonify({'error': str(e)}), 500
+
 
 
 

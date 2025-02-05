@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
     <title>AI Analytics Dashboard</title>
     <style>
         /* General Styles */
@@ -150,209 +151,380 @@
             <h1>AI Analytics Dashboard</h1>
             <p>Hello! I'm your AI analytics assistant. Upload a CSV file to begin analysis.</p>
         </header>
-
+    
         <!-- File Upload -->
         <div class="file-upload">
             <label for="csv-file">Drag and drop your CSV file here or click to browse</label>
             <input type="file" id="csv-file" accept=".csv" />
-            <p id="upload-status"></p>
+            <p id="upload-status"></p> <!-- Shows the status or error messages -->
         </div>
-
+    
         <!-- Analysis Buttons -->
         <div class="button-group">
             <button onclick="analyzeData()">Analyze Data Distribution</button>
             <button onclick="showCorrelation()">Show Correlation Matrix</button>
             <button onclick="generateSummary()">Generate Summary Statistics</button>
             <button onclick="identifyTrends()">Identify Trends</button>
+            <button onclick="compareCategories()">Compare Categories</button>
         </div>
-
+            
         <!-- Chat Interface -->
         <div class="chat-container" id="chat-container">
             <div class="message ai-message">
                 Upload a CSV file and start analyzing your data!
             </div>
         </div>
-
-        <!-- Input Section -->
+    
+        <!-- Input Section for Asking Questions -->
         <div class="input-section">
-            <input type="text" id="question-input" placeholder="Ask me anything about your data..." />
+            <input type="text" id="question-input" placeholder="Ask me anything about your data..." autofocus />
             <button onclick="askQuestion()">Ask</button>
         </div>
     </div>
+    
 
     <script>
-        // File Upload Handling
-        document.getElementById('csv-file').addEventListener('change', function (event) {
+        document.getElementById('csv-file').addEventListener('change', handleFileChange);
+    
+        function handleFileChange(event) {
             const file = event.target.files[0];
-            if (!file || !file.name.endsWith('.csv')) {
-                document.getElementById('upload-status').textContent = 'Please upload a valid CSV file.';
+    
+            if (!file) {
+                updateUploadStatus('Please select a file.');
                 return;
             }
-
-            if (file.size > 10 * 1024 * 1024) { // Limit file size to 10MB
-                document.getElementById('upload-status').textContent = 'File size exceeds the limit (10MB).';
+    
+            if (!file.name.endsWith('.csv')) {
+                updateUploadStatus('Invalid file format. Please upload a CSV file.');
                 return;
             }
-
+    
+            if (file.size > 16 * 1024 * 1024) {
+                updateUploadStatus('File size exceeds the limit (16MB).');
+                return;
+            }
+    
             const formData = new FormData();
             formData.append('file', file);
-
-            document.getElementById('upload-status').textContent = 'Uploading...'; // Show loading message
-
+    
+            updateUploadStatus('Uploading...');
+    
             fetch('/api/upload', {
                 method: 'POST',
                 body: formData
             })
             .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    document.getElementById('upload-status').textContent = `Error: ${data.error}`;
-                } else {
-                    document.getElementById('upload-status').textContent = 'File uploaded successfully!';
-                    this.value = ''; // Clear the input field
-                }
-            })
+            .then(data => handleUploadResponse(data))
             .catch(error => {
-                document.getElementById('upload-status').textContent = 'An error occurred during upload.';
+                console.error("DEBUG: Fetch error:", error);
+                updateUploadStatus('An error occurred during upload.');
             });
-        });
-
-        // Add Message to Chat
-        function addMessage(sender, message, loading = false) {
-            const container = document.getElementById('chat-container');
-            const msgDiv = document.createElement('div');
-            msgDiv.className = `message ${sender}-message`;
-            if (loading) {
-                msgDiv.textContent = 'Loading...';
+    
+            event.target.value = ''; // Reset file input
+        }
+    
+        function updateUploadStatus(status) {
+            document.getElementById('upload-status').textContent = status;
+        }
+    
+        function handleUploadResponse(data) {
+            console.log("DEBUG: Response from server:", data);
+    
+            if (data.error) {
+                updateUploadStatus(`Error: ${data.error}`);
             } else {
-                msgDiv.innerHTML = `<p>${message}</p>`;
+                updateUploadStatus('File uploaded successfully!');
+                displayDataAnalysis(data);
             }
-            container.appendChild(msgDiv);
-            container.scrollTop = container.scrollHeight;
         }
-
-        // Analyze Data Distribution
-        function analyzeData() {
-            addMessage('user', 'Analyze data distribution');
-            addMessage('ai', '', true);
-            fetch('/api/analyze', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: 'Analyze data distribution' })
-            })
-            .then(response => response.json())
-            .then(data => {
-                let result = `<p>${data.answer}</p>`;
-                if (data.visualizations && data.visualizations.length > 0) {
-                    const plotDiv = document.createElement('div');
-                    Plotly.newPlot(plotDiv, data.visualizations[0].data.data, data.visualizations[0].data.layout);
-                    result += plotDiv.outerHTML;
-                }
-                addMessage('ai', result);
-            })
-            .catch(error => {
-                addMessage('ai', 'An error occurred while processing your request.');
-            });
+    
+        function displayDataAnalysis(data) {
+            const chatContainer = document.getElementById('chat-container');
+    
+            let analysisHTML = `
+                <div class="message ai-message">
+                    <strong>Initial Data Analysis</strong><br>
+                    ${createSummaryStatistics(data)}
+                    ${createOutliers(data)}
+                    ${createGroqInsights(data)}
+            `;
+    
+            if (data.visualizations) {
+                analysisHTML += `<p><strong>Initial Visualizations:</strong></p>`;
+                analysisHTML += renderVisualizations(data.visualizations);
+            }
+    
+            analysisHTML += `</div>`;
+            chatContainer.innerHTML += analysisHTML;
+    
+            renderPlots(data.visualizations);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
         }
+    
+        function createSummaryStatistics(data) {
+            return data.summary_statistics ? `
+                <p><strong>Summary Statistics:</strong>
+                <pre>${JSON.stringify(data.summary_statistics, null, 2)}</pre>
+                </p>
+            ` : '';
+        }
+    
+        function createOutliers(data) {
+            if (data.outliers) {
+                return `
+                    <p><strong>Outliers Detection:</strong>
+                    <pre>${Object.entries(data.outliers)
+                        .filter(([_, value]) => value.count > 0)
+                        .map(([key, value]) => `${key}: ${value.count} outliers (Range: ${value.lower_bound.toFixed(2)} - ${value.upper_bound.toFixed(2)})`)
+                        .join('<br>')}
+                    </pre></p>
+                `;
+            }
+            return '';
+        }
+    
+        function createGroqInsights(data) {
+            return data.groq_insights ? `
+                <p><strong>AI Insights:</strong>
+                ${data.groq_insights}
+                </p>
+            ` : '';
+        }
+    
+        function renderVisualizations(visualizations) {
+            return Object.entries(visualizations).map(([key, plotData]) => {
+                return `<div id="plot-${key}" style="width: 100%; height: 400px;"></div>`;
+            }).join('');
+        }
+    
+        function renderPlots(visualizations) {
+    if (!visualizations) return;
+    
+    Object.entries(visualizations).forEach(([key, plotData]) => {
+        try {
+            const parsedPlotData = typeof plotData === 'string' ? 
+                JSON.parse(plotData) : plotData;
+            
+            const plotElement = document.getElementById(`plot-${key}`);
+            if (plotElement) {
+                Plotly.newPlot(`plot-${key}`, 
+                    parsedPlotData.data, 
+                    parsedPlotData.layout || {});
+            }
+        } catch (error) {
+            console.error(`Error rendering plot ${key}:`, error);
+        }
+    });
+}
+    
+     
 
         // Show Correlation Matrix
         function showCorrelation() {
-            addMessage('user', 'Show correlation matrix');
-            addMessage('ai', '', true);
-            fetch('/api/analyze', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: 'Show correlation matrix' })
-            })
-            .then(response => response.json())
-            .then(data => {
-                let result = `<p>${data.answer}</p>`;
-                if (data.visualizations && data.visualizations.length > 0) {
-                    const plotDiv = document.createElement('div');
-                    Plotly.newPlot(plotDiv, data.visualizations[0].data.data, data.visualizations[0].data.layout);
-                    result += plotDiv.outerHTML;
-                }
-                addMessage('ai', result);
-            })
-            .catch(error => {
-                addMessage('ai', 'An error occurred while processing your request.');
-            });
+    addMessage('user', 'Show correlation matrix');
+    addMessage('ai', '', true);
+    fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: 'Show correlation matrix' })
+    })
+    .then(response => response.json())
+    .then(data => {
+        let result = `<p>${data.answer}</p>`;
+        if (data.visualizations && data.visualizations.length > 0) {
+            const plotDiv = document.createElement('div');
+            plotDiv.id = `plot-${Date.now()}`;
+            result += `<div id="${plotDiv.id}"></div>`;
+            addMessage('ai', result);
+            Plotly.newPlot(plotDiv.id, data.visualizations[0].data.data, data.visualizations[0].data.layout);
+        } else {
+            addMessage('ai', result);
         }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        addMessage('ai', 'An error occurred while processing your request.');
+    });
+}
 
         // Generate Summary Statistics
         function generateSummary() {
-            addMessage('user', 'Generate summary statistics');
-            addMessage('ai', '', true);
-            fetch('/api/analyze', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: 'Generate summary statistics' })
-            })
-            .then(response => response.json())
-            .then(data => {
-                addMessage('ai', `<pre>${data.answer}</pre>`);
-            })
-            .catch(error => {
-                addMessage('ai', 'An error occurred while processing your request.');
-            });
+    addMessage('user', 'Generate summary statistics');
+    addMessage('ai', '', true);
+    fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: 'Generate summary statistics' })
+    })
+    .then(response => response.json())
+    .then(data => {
+        let result = `<p>${data.answer}</p>`;
+        if (data.visualizations && data.visualizations.length > 0) {
+            const plotDiv = document.createElement('div');
+            plotDiv.id = `plot-${Date.now()}`;
+            result += `<div id="${plotDiv.id}"></div>`;
+            addMessage('ai', result);
+            Plotly.newPlot(plotDiv.id, data.visualizations[0].data.data, data.visualizations[0].data.layout);
+        } else {
+            addMessage('ai', result);
         }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        addMessage('ai', 'An error occurred while processing your request.');
+    });
+}
 
         // Identify Trends
         function identifyTrends() {
-            addMessage('user', 'Identify trends');
-            addMessage('ai', '', true);
-            fetch('/api/analyze', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: 'Identify trends' })
-            })
-            .then(response => response.json())
-            .then(data => {
-                let result = `<p>${data.answer}</p>`;
-                if (data.visualizations && data.visualizations.length > 0) {
-                    const plotDiv = document.createElement('div');
-                    Plotly.newPlot(plotDiv, data.visualizations[0].data.data, data.visualizations[0].data.layout);
-                    result += plotDiv.outerHTML;
-                }
-                addMessage('ai', result);
-            })
-            .catch(error => {
-                addMessage('ai', 'An error occurred while processing your request.');
-            });
+    addMessage('user', 'Identify trends over time');
+    addMessage('ai', '', true);
+    fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: 'trends over time' })
+    })
+    .then(response => response.json())
+    .then(data => {
+        let result = `<p>${data.answer}</p>`;
+        if (data.visualizations && data.visualizations.length > 0) {
+            const plotDiv = document.createElement('div');
+            plotDiv.id = `plot-${Date.now()}`;
+            result += `<div id="${plotDiv.id}"></div>`;
+            addMessage('ai', result);
+            Plotly.newPlot(plotDiv.id, data.visualizations[0].data.data, data.visualizations[0].data.layout);
+        } else {
+            addMessage('ai', result);
         }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        addMessage('ai', 'An error occurred while processing your request.');
+    });
+}
+
+function compareCategories() {
+    addMessage('user', 'Compare categories');
+    addMessage('ai', '', true);
+    fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: 'compare categories' })
+    })
+    .then(response => response.json())
+    .then(data => {
+        let result = `<p>${data.answer}</p>`;
+        if (data.visualizations && data.visualizations.length > 0) {
+            const plotDiv = document.createElement('div');
+            plotDiv.id = `plot-${Date.now()}`;
+            result += `<div id="${plotDiv.id}"></div>`;
+            addMessage('ai', result);
+            Plotly.newPlot(plotDiv.id, data.visualizations[0].data.data, data.visualizations[0].data.layout);
+        } else {
+            addMessage('ai', result);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        addMessage('ai', 'An error occurred while processing your request.');
+    });
+}
 
 
         // Ask Question
         function askQuestion() {
-            const question = document.getElementById('question-input').value.trim();
-            if (!question) {
-                alert('Please enter a question.');
-                return;
-            }
+    const question = document.getElementById('question-input').value.trim();
+    if (!question) {
+        alert('Please enter a question.');
+        return;
+    }
 
-            addMessage('user', question);
-            addMessage('ai', '', true);
-            fetch('/api/ask', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question })
-            })
-            .then(response => response.json())
-            .then(data => {
-                let result = `<p>${data.answer}</p>`;
-                if (data.plot) {
-                    const plotDiv = document.createElement('div');
-                    Plotly.newPlot(plotDiv, data.plot.data, data.plot.layout);
-                    result += plotDiv.outerHTML;
-                }
-                addMessage('ai', result);
-            })
-            .catch(error => {
-                addMessage('ai', 'An error occurred while processing your request.');
-            });
+    addMessage('user', question);
+    addMessage('ai', '', true);
+    fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question })
+    })
+    .then(response => response.json())
+    .then(data => {
+        let result = `<p>${data.answer}</p>`;
+        if (data.plot) {
+            const plotDiv = document.createElement('div');
+            plotDiv.id = `plot-${Date.now()}`;
+            result += `<div id="${plotDiv.id}"></div>`;
+            addMessage('ai', result);
+            const plotData = JSON.parse(data.plot);
+            Plotly.newPlot(plotDiv.id, plotData.data, plotData.layout);
+        } else {
+            addMessage('ai', result);
         }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        addMessage('ai', 'An error occurred while processing your request.');
+    });
+}
+
+// Function to analyze data distribution
+function analyzeData() {
+    addMessage('user', 'Analyze data distribution');
+    addMessage('ai', '', true);
+    fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: 'analyze distribution' })
+    })
+    .then(response => response.json())
+    .then(data => {
+        let result = `<p>${data.answer}</p>`;
+        if (data.visualizations && data.visualizations.length > 0) {
+            const plotDiv = document.createElement('div');
+            plotDiv.id = `plot-${Date.now()}`;
+            result += `<div id="${plotDiv.id}"></div>`;
+            addMessage('ai', result);
+            Plotly.newPlot(plotDiv.id, data.visualizations[0].data.data, data.visualizations[0].data.layout);
+        } else {
+            addMessage('ai', result);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        addMessage('ai', 'An error occurred while processing your request.');
+    });
+}
+
+// Utility function to handle the loading state and messages
+function addMessage(sender, message, loading = false) {
+    const container = document.getElementById('chat-container');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `message ${sender}-message`;
+    
+    if (loading) {
+        msgDiv.innerHTML = '<p><i>Processing...</i></p>';
+    } else {
+        msgDiv.innerHTML = message;
+    }
+    
+    container.appendChild(msgDiv);
+    container.scrollTop = container.scrollHeight;
+    
+    return msgDiv; // Return the message div in case we need to update it later
+}
+
+// Event listener for Enter key in question input
+document.getElementById('question-input').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+        askQuestion();
+    }
+});
+
     </script>
 
+    
+
 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+
 </body>
 </html>
