@@ -18,9 +18,13 @@ def perform_initial_analysis(df):
         numeric_cols = df.select_dtypes(include=[np.number]).columns
         date_cols = df.select_dtypes(include=['datetime64']).columns
 
-        if len(numeric_cols) == 0:
+        if numeric_cols.empty:
             print("DEBUG: No numeric columns found.")
             return {'error': 'No numeric columns found for analysis.'}
+
+        if date_cols.empty:
+            print("DEBUG: No date columns found.")
+            return {'error': 'No date columns found for time-based analysis.'}
 
         # Generate summary statistics
         print("DEBUG: Generating summary statistics...")
@@ -28,11 +32,14 @@ def perform_initial_analysis(df):
 
         # Detect outliers
         print("DEBUG: Detecting outliers...")
-        outliers = BusinessAnalyzer.detect_outliers(df, threshold=1.5)  # Using the threshold parameter from your BusinessAnalyzer class
+        outliers = BusinessAnalyzer.detect_outliers(df)
 
         # Generate visualizations
         print("DEBUG: Generating visualizations...")
         plots = BusinessAnalyzer.generate_plots(df)
+        for key, plot_data in plots.items():
+            if hasattr(plot_data, 'to_json'):
+                plots[key] = plot_data.to_json()
 
         # AI insights
         print("DEBUG: Fetching AI-based insights from Groq API...")
@@ -47,31 +54,17 @@ def perform_initial_analysis(df):
             print(f"DEBUG: AI insights error - {e}")
             groq_insights = "Error retrieving AI insights"
 
-        # Basic dataset info
-        dataset_info = {
-            'total_rows': len(df),
-            'total_columns': len(df.columns),
-            'numeric_columns': list(numeric_cols),
-            'date_columns': list(date_cols),
-            'categorical_columns': list(df.select_dtypes(include=['object']).columns)
-        }
-
         # Prepare response
         response = {
-            'dataset_info': dataset_info,
             'summary_statistics': summary_stats,
             'outliers': outliers,
             'visualizations': plots,
-            'groq_insights': groq_insights,
-            'success': True
+            'groq_insights': groq_insights
         }
 
         print("DEBUG: Initial analysis completed successfully.")
         return response
 
     except Exception as e:
-        print(f"DEBUG: Initial Analysis Error - {str(e)}")
-        return {
-            'error': str(e),
-            'success': False
-        }
+        print(f"DEBUG: Initial Analysis Error - {e}")
+        return {'error': str(e)}
