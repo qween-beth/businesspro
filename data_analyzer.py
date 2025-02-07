@@ -209,7 +209,7 @@ class AIDataAnalyzer:
         except Exception as e:
             return f"Error analyzing data: {str(e)}"
         
-        
+
     def _get_analysis(self, df: pd.DataFrame, question: str, context: str, metadata: Dict) -> str:
         prompt = f"""
         Analyze this data focusing on {', '.join(metadata['metrics'])}
@@ -306,7 +306,7 @@ class AIDataAnalyzer:
                 if metric in df.columns:
                     if metadata['categories']:
                         fig = px.bar(df, x=metadata['categories'][0], y=metric,
-                                   title=f'{metric} by {metadata['categories'][0]}')
+                              title=f"{metric} by {metadata['categories'][0]}")
                     else:
                         fig = px.histogram(df, x=metric,
                                          title=f'Distribution of {metric}')
