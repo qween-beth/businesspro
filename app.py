@@ -1,8 +1,8 @@
 from flask import Flask, send_file, make_response, render_template, request, flash, jsonify, session, redirect, url_for, session, has_request_context
-from data_analyzer import AIDataAnalyzer
+from data_analyzer import AIDataAnalyzer, EnhancedAnalyzer
 from io import StringIO
 from business_intelligence import BusinessAnalyzer
-from perform_initial_analysis import perform_initial_analysis 
+from perform_initial_analysis import perform_initial_analysis
 import pandas as pd
 import numpy as np
 import tempfile
@@ -44,6 +44,7 @@ class CustomJSONEncoder(json.JSONEncoder):
 
 app.secret_key = os.urandom(24)
 data_analyzer = AIDataAnalyzer()
+data_analyzer2 = EnhancedAnalyzer()
 business_intelligence = BusinessAnalyzer()
 
 app.json_encoder = CustomJSONEncoder
@@ -418,6 +419,57 @@ def analyze():
             'visualizations': []
         }
         
+        # Define keyword mappings for different types of analyses
+        analysis_types = {
+            'trend': ['trend', 'time', 'over time', 'changed', 'evolution', 'progress'],
+            'category': ['categor', 'compar', 'difference', 'versus', 'vs', 'between'],
+            'summary': ['summary', 'stat', 'overview', 'distribution'],
+            'satisfaction': ['satisfaction', 'happy', 'unhappy', 'satisfied', 'dissatisfied', 'rating'],
+        }
+        
+        # Determine analysis type from question
+        detected_type = None
+        for analysis_type, keywords in analysis_types.items():
+            if any(keyword in question for keyword in keywords):
+                detected_type = analysis_type
+                break
+        
+        if detected_type == 'satisfaction':
+            # Look for satisfaction-related columns
+            satisfaction_cols = [col for col in df.columns if any(
+                term in col.lower() 
+                for term in ['satisfaction', 'rating', 'score', 'csat', 'nps']
+            )]
+            
+            if satisfaction_cols:
+                sat_col = satisfaction_cols[0]
+                # Create trend analysis if date column exists
+                date_cols = df.select_dtypes(include=['datetime64']).columns
+                if len(date_cols) > 0:
+                    fig = px.line(
+                        df,
+                        x=date_cols[0],
+                        y=sat_col,
+                        title=f'Customer Satisfaction Trend'
+                    )
+                    response['visualizations'].append({
+                        'type': 'plot',
+                        'data': json.loads(fig.to_json())
+                    })
+                
+                # Add summary statistics
+                stats = df[sat_col].describe()
+                response['answer'] = (
+                    f"Customer Satisfaction Analysis:\n"
+                    f"Average rating: {stats['mean']:.2f}\n"
+                    f"Minimum: {stats['min']:.2f}\n"
+                    f"Maximum: {stats['max']:.2f}\n"
+                    f"Most recent: {df[sat_col].iloc[-1]:.2f}"
+                )
+            else:
+                response['answer'] = "No satisfaction-related columns found in the dataset"
+              
+        
         # Handle trend analysis
         if 'trend' in question or 'time' in question:
             # First try to find date columns
@@ -495,8 +547,83 @@ def analyze():
                 for val, count in counts.items():
                     response['answer'] += f"  {val}: {count}\n"
 
-        else:
-            response['answer'] = "Please specify the type of analysis (trends, categories, or summary)"
+        # Distribution analysis
+        elif any(word in question for word in ['distribution', 'spread', 'histogram']):
+            numeric_cols = df.select_dtypes(include=[np.number]).columns
+            extracted_cols = BusinessAnalyzer.extract_columns(question, df)
+
+            if len(numeric_cols) > 0:
+                col = extracted_cols[0] if extracted_cols else numeric_cols[0]
+                fig = px.histogram(df, x=col, title=f'Distribution of {col}')
+                response['visualizations'].append({
+                    'type': 'plot',
+                    'data': json.loads(plotly.utils.PlotlyJSONEncoder().encode(fig))
+                })
+                response['answer'] = f"Showing distribution analysis for {col}."
+            else:
+                response['answer'] = "Unable to perform distribution analysis. Ensure your dataset contains numeric columns."
+
+        # Correlation analysis
+        elif any(word in question for word in ['correlation', 'correlate', 'relationship']):
+                numeric_cols = df.select_dtypes(include=[np.number]).columns
+                if len(numeric_cols) >= 2:
+                    corr_matrix = df[numeric_cols].corr()
+                    
+                    # Create correlation heatmap
+                    fig = px.imshow(
+                        corr_matrix,
+                        labels=dict(color="Correlation Coefficient"),
+                        title="Correlation Matrix",
+                        color_continuous_scale="RdBu"
+                    )
+                    
+                    # Properly serialize the Plotly figure
+                    response['visualizations'].append({
+                        'type': 'plot',
+                        'data': json.loads(fig.to_json())
+                    })
+                    
+                    # Add correlation insights
+                    strong_correlations = []
+                    for i in range(len(numeric_cols)):
+                        for j in range(i+1, len(numeric_cols)):
+                            corr = corr_matrix.iloc[i,j]
+                            if abs(corr) > 0.5:
+                                strong_correlations.append(
+                                    f"{numeric_cols[i]} and {numeric_cols[j]}: {corr:.2f}"
+                                )
+                    
+                    response['answer'] = "Here's the correlation analysis:\n"
+                    if strong_correlations:
+                        response['answer'] += "\nStrong correlations found:\n- " + "\n- ".join(strong_correlations)
+                    else:
+                        response['answer'] += "\nNo strong correlations found between numeric variables."
+
+        elif not detected_type:
+            # If no analysis type was detected, try to find relevant columns
+            relevant_columns = []
+            question_tokens = question.split()
+            
+            # Try to identify relevant columns from the question
+            for col in df.columns:
+                if any(token in col.lower() for token in question_tokens):
+                    relevant_columns.append(col)
+            
+            if relevant_columns:
+                response['answer'] = (
+                    f"I found these relevant columns: {', '.join(relevant_columns)}\n"
+                    "Please specify what type of analysis you'd like:\n"
+                    "- Trends over time\n"
+                    "- Category comparisons\n"
+                    "- Statistical summary"
+                )
+            else:
+                response['answer'] = (
+                    "Please specify the type of analysis you'd like:\n"
+                    "- Trends over time\n"
+                    "- Category comparisons\n"
+                    "- Statistical summary"
+                )
 
         return app.response_class(
             response=json.dumps(response, cls=plotly.utils.PlotlyJSONEncoder),
@@ -534,41 +661,73 @@ def ask_question():
         analyzer = AIDataAnalyzer()
         
         # Get analysis and visualizations
-        answer, visualizations = analyzer.analyze(df, question)
+        answer, ai_visualizations = analyzer.analyze(df, question)
         
-        # Get traditional analysis if needed
-        bi_response = business_intelligence.analyze_question(df, question)
+        analyzer2 = EnhancedAnalyzer()
+
+        # Get traditional analysis
+        bi_response = analyzer2.analyze(df, question)
         
         # Combine insights
         combined_answer = answer
         if bi_response.get('answer'):
             combined_answer += f"\n\nAdditional Analysis:\n{bi_response['answer']}"
         
-        # Combine visualizations
-        if bi_response.get('visualizations'):
-            visualizations.extend(bi_response['visualizations'])
-        
-        # Prepare visualization data
+        # Process and combine visualizations
         plot_data = []
-        if visualizations:
-            try:
-                for viz in visualizations:
-                    if viz.get('data'):
+        
+        # Process AI visualizations
+        if ai_visualizations:
+            for viz in ai_visualizations:
+                try:
+                    if isinstance(viz, dict) and 'type' in viz and viz['type'] == 'plot':
+                        # Handle plotly JSON format
                         plot_data.append({
                             'data': viz['data'].get('data', []),
                             'layout': viz['data'].get('layout', {})
                         })
-            except Exception as e:
-                print(f"DEBUG: Plot serialization error - {e}")
+                    elif isinstance(viz, dict) and 'data' in viz:
+                        # Direct plot data format
+                        plot_data.append({
+                            'data': viz.get('data', []),
+                            'layout': viz.get('layout', {})
+                        })
+                except Exception as e:
+                    print(f"DEBUG: Error processing AI visualization - {e}")
+                    continue
+        
+        # Process BI visualizations
+        if bi_response.get('visualizations'):
+            for viz in bi_response['visualizations']:
+                try:
+                    if isinstance(viz, dict) and 'type' in viz and viz['type'] == 'plot':
+                        # Handle plotly JSON format
+                        plot_data.append({
+                            'data': viz['data'].get('data', []),
+                            'layout': viz['data'].get('layout', {})
+                        })
+                    elif isinstance(viz, dict) and 'data' in viz:
+                        # Direct plot data format
+                        plot_data.append({
+                            'data': viz.get('data', []),
+                            'layout': viz.get('layout', {})
+                        })
+                except Exception as e:
+                    print(f"DEBUG: Error processing BI visualization - {e}")
+                    continue
+        
+        # Add debug logging
+        print(f"DEBUG: Number of plots processed: {len(plot_data)}")
+        print("DEBUG: Plot data structure:", json.dumps(plot_data[0] if plot_data else {}, default=str)[:200] + "...")
         
         return jsonify({
             'answer': combined_answer,
-            'plots': plot_data if plot_data else None
+            'plots': plot_data if plot_data else []
         })
     
     except Exception as e:
         print(f"DEBUG: API Error - {e}")
-        traceback.print_exc()  # More detailed error logging
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 

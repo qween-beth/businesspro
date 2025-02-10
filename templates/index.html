@@ -7,7 +7,8 @@
     <title>AI Analytics Dashboard</title>
     <style>
         /* General Styles */
-        body {
+    /* General Styles */
+    body {
             font-family: 'Arial', sans-serif;
             background-color: #121212;
             color: white;
@@ -142,54 +143,6 @@
         .button-group button:hover {
             background-color: #4a90e2;
         }
-
-        
-    .analysis-result {
-        width: 100%;
-        margin: 1rem 0;
-    }
-    
-.answer-text {
-    margin-bottom: 1rem;
-    line-height: 1.5;
-}
-
-.visualizations {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    margin-top: 1rem;
-}
-
-.plot-container {
-    width: 100%;
-    min-height: 400px;
-    background: white;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    overflow: hidden;
-}
-
-.plot {
-    width: 100%;
-    height: 100%;
-}
-
-.loading {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    color: #666;
-    font-style: italic;
-}
-
-.error-message {
-    color: #dc3545;
-    padding: 1rem;
-    border-left: 4px solid #dc3545;
-    background: #fff5f5;
-    margin: 1rem 0;
-}
     </style>
 </head>
 <body>
@@ -512,76 +465,135 @@ function askQuestion() {
         alert('Please enter a question.');
         return;
     }
-    
-    // Add user message
+
+    document.getElementById('question-input').value = '';
     addMessage('user', question);
-    
-    // Add loading state
-    const loadingId = `loading-${Date.now()}`;
+
+    const messageId = Date.now();
+    const loadingId = `loading-${messageId}`;
     addMessage('ai', '<div class="loading">Analyzing data...</div>', false, loadingId);
-    
+
     fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question })
     })
     .then(response => {
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         return response.json();
     })
     .then(data => {
         // Remove loading message
         const loadingElement = document.getElementById(loadingId);
-        if (loadingElement) {
-            loadingElement.remove();
-        }
-        
-        // Create result HTML
+        if (loadingElement) loadingElement.remove();
+
+        // Create message container
         let result = `<div class="analysis-result">`;
-        
-        // Add answer text
-        result += `<div class="answer-text">${data.answer.replace(/\n/g, '<br>')}</div>`;
-        
-        // Add plots if available
+
+        // Add text answer if present
+        if (data.answer) {
+            result += `<div class="answer-text">${data.answer.replace(/\n/g, '<br>')}</div>`;
+        }
+
+        // Add plot containers if plots exist
         if (data.plots && data.plots.length > 0) {
             result += `<div class="visualizations">`;
-            data.plots.forEach((plot, index) => {
-                const plotId = `plot-${Date.now()}-${index}`;
-                result += `<div class="plot-container">
-                    <div id="${plotId}" class="plot"></div>
-                </div>`;
+            data.plots.forEach((_, index) => {
+                const plotId = `plot-${messageId}-${index}`;
+                result += `
+                    <div class="plot-container">
+                        <div id="${plotId}" class="plot"></div>
+                    </div>
+                `;
             });
             result += `</div>`;
         }
-        
+
         result += `</div>`;
-        
-        // Add the complete message
-        addMessage('ai', result);
-        
-        // Render plots if available
+
+        // Add the message to the chat
+        const messageDiv = addMessage('ai', result);
+
+        // Render plots
         if (data.plots && data.plots.length > 0) {
-            data.plots.forEach((plot, index) => {
-                const plotId = `plot-${Date.now()}-${index}`;
-                Plotly.newPlot(plotId, plot.data, plot.layout, {
-                    responsive: true,
-                    displayModeBar: true,
-                    displaylogo: false
+            // Wait for DOM to be ready
+            requestAnimationFrame(() => {
+                data.plots.forEach((plot, index) => {
+                    const plotId = `plot-${messageId}-${index}`;
+                    const plotElement = document.getElementById(plotId);
+
+                    if (!plotElement) {
+                        console.error(`Plot element ${plotId} not found`);
+                        return;
+                    }
+
+                    try {
+                        // Validate plot data
+                        if (!plot.data || !Array.isArray(plot.data)) {
+                            console.error('Invalid plot data structure:', plot);
+                            throw new Error('Invalid plot data structure');
+                        }
+
+                        // Create layout with responsive dimensions
+                        const layout = {
+                            ...plot.layout,
+                            width: plotElement.offsetWidth,
+                            height: 400,
+                            margin: { t: 30, r: 30, b: 50, l: 50 },
+                            paper_bgcolor: '#ffffff',
+                            plot_bgcolor: '#f8f9fa',
+                            font: {
+                                family: 'Arial, sans-serif',
+                                size: 12,
+                                color: '#333333'
+                            },
+                            // Add autosize for better responsiveness
+                            autosize: true
+                        };
+
+                        // Create plot with error handling
+                        Plotly.newPlot(plotId, plot.data, layout, {
+                            responsive: true,
+                            displayModeBar: true,
+                            displaylogo: false,
+                            modeBarButtonsToRemove: ['sendDataToCloud', 'lasso2d', 'select2d']
+                        }).catch(error => {
+                            console.error(`Error creating plot ${plotId}:`, error);
+                            plotElement.innerHTML = `<div class="error-message">Error rendering plot: ${error.message}</div>`;
+                        });
+                    } catch (error) {
+                        console.error(`Error setting up plot ${plotId}:`, error);
+                        plotElement.innerHTML = `<div class="error-message">Error rendering plot: ${error.message}</div>`;
+                    }
                 });
             });
         }
     })
     .catch(error => {
         console.error('Error:', error);
-        // Remove loading message
         const loadingElement = document.getElementById(loadingId);
-        if (loadingElement) {
-            loadingElement.remove();
-        }
+        if (loadingElement) loadingElement.remove();
         addMessage('ai', `<div class="error-message">An error occurred while processing your request: ${error.message}</div>`);
     });
+}
+
+// Helper function to add messages to the chat
+function addMessage(sender, message, loading = false) {
+    const container = document.getElementById('chat-container');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `message ${sender}-message`;
+    msgDiv.id = `message-${Date.now()}`; // Add unique ID to message div
+    
+    if (loading) {
+        msgDiv.innerHTML = '<p><i>Processing...</i></p>';
+    } else {
+        msgDiv.innerHTML = message;
+    }
+    
+    container.appendChild(msgDiv);
+    container.scrollTop = container.scrollHeight;
+    
+    return msgDiv;
 }
 
 // Function to analyze data distribution
@@ -637,7 +649,7 @@ document.getElementById('question-input').addEventListener('keypress', function(
     }
 });
 
-    </script>
+</script>
 
     
 
